@@ -112,7 +112,8 @@ func main() {
 		setting:       config,
 	}
 
-	http.HandleFunc("/github", server.handleGithubHook)
+	http.HandleFunc(prefixWebHookPath, server.handleGithubHook)
+	http.HandleFunc("/", server.handleRESTApiRequest)
 
 	if useTLS {
 		http.ListenAndServeTLS(config.PortStr(), certPath, keyPath, nil)

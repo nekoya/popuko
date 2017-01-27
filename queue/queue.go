@@ -83,6 +83,17 @@ func (s *AutoMergeQueueHandle) Load() *AutoMergeQueue {
 	return result
 }
 
+func (s *AutoMergeQueueHandle) LoadAsRawByte() []byte {
+	owner := s.owner
+	name := s.name
+	ok, b := s.parent.repo.loadAsByte(owner, name)
+	if !ok {
+		return nil
+	}
+
+	return b
+}
+
 type AutoMergeQueue struct {
 	ownerHandle *AutoMergeQueueHandle
 

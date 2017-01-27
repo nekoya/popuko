@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"reflect"
+	"strings"
 
 	"github.com/google/go-github/github"
 	"golang.org/x/oauth2"
@@ -22,6 +23,8 @@ type AppServer struct {
 	autoMergeRepo *queue.AutoMergeQRepo
 	setting       *setting.Settings
 }
+
+const prefixWebHookPath = "/github"
 
 func (srv *AppServer) handleGithubHook(rw http.ResponseWriter, req *http.Request) {
 	log.Println("info: Start: handle GitHub WebHook")
@@ -193,4 +196,66 @@ func createGithubClient(config *setting.Settings) *github.Client {
 	tc := oauth2.NewClient(oauth2.NoContext, ts)
 	client := github.NewClient(tc)
 	return client
+}
+
+const prefixRestAPI = "/api/v0"
+const prefixQueueInfoAPI = "/queue/"
+
+func (srv *AppServer) handleRESTApiRequest(rw http.ResponseWriter, req *http.Request) {
+	p := strings.TrimPrefix(req.URL.Path, prefixRestAPI)
+	if strings.HasPrefix(p, prefixQueueInfoAPI) {
+		repo := strings.TrimPrefix(p, prefixQueueInfoAPI)
+		srv.getQueueInfoForRepository(rw, req, repo)
+		return
+	}
+
+	rw.WriteHeader(http.StatusNotFound)
+}
+
+func (srv *AppServer) getQueueInfoForRepository(rw http.ResponseWriter, req *http.Request, repo string) {
+	if req.Method != "GET" {
+		rw.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
+	var owner string
+	var name string
+	{
+		tmp := strings.Split(repo, "/")
+		if !(len(tmp) == 2) && !(len(tmp) == 3) { // accept `/bar/foo/` style.
+			rw.WriteHeader(http.StatusNotFound)
+			m := "info: the repo name is invalid"
+			log.Printf(m+"%+v\n", tmp)
+			io.WriteString(rw, m)
+			return
+		}
+
+		owner = tmp[0]
+		name = tmp[1]
+	}
+
+	qhandle := srv.autoMergeRepo.Get(owner, name)
+	if qhandle == nil {
+		rw.WriteHeader(http.StatusNotFound)
+		m := fmt.Sprintf("error: cannot get the queue handle for `%v/%v`", owner, name)
+		log.Println(m)
+		io.WriteString(rw, m)
+		return
+	}
+
+	qhandle.Lock()
+	defer qhandle.Unlock()
+
+	b := qhandle.LoadAsRawByte()
+	if b == nil {
+		rw.WriteHeader(http.StatusInternalServerError)
+		m := fmt.Sprintf("error: cannot get the queue information for `%v/%v`", owner, name)
+		log.Println(m)
+		io.WriteString(rw, m)
+		return
+	}
+
+	rw.Header().Set("Content-Type", "application/json; charset=utf-8")
+	rw.WriteHeader(http.StatusOK)
+	rw.Write(b)
 }
